@@ -259,12 +259,19 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf_kpts=None):
         vhf_kpts = mf.get_veff(mf.cell, dm_kpts)
 
     nkpts = len(dm_kpts)
-    e1 = 1./nkpts * np.einsum('kij,kji->', dm_kpts, h1e_kpts)
-    e2 = 1./nkpts * np.einsum('kij,kji->', dm_kpts, vhf_kpts) * 0.5
+    ecoul = getattr(vhf_kpts, 'ecoul', None)
+    if getattr(vhf_kpts, 'paper_vj', None) is not None:
+        # Eq. (84) of the paper route (with_df.jk_route = 'paper'): E_h, E_J and
+        # E_K as three binary contractions, with the J and K of the Fock matrix
+        e_h, e_j, e_k = mf.with_df.energy_elec_paper_route(
+            dm_kpts, h1e_kpts, vhf_kpts.paper_vj, vhf_kpts.paper_vk)
+        e1, e2, ecoul = np.asarray(e_h), np.asarray(e_j + e_k), np.asarray(e_j)
+    else:
+        e1 = 1./nkpts * np.einsum('kij,kji->', dm_kpts, h1e_kpts)
+        e2 = 1./nkpts * np.einsum('kij,kji->', dm_kpts, vhf_kpts) * 0.5
     mf.scf_summary['e1'] = e1.real
     mf.scf_summary['e2'] = e2.real
-    if hasattr(vhf_kpts, 'ecoul'):
-        ecoul = vhf_kpts.ecoul
+    if ecoul is not None:
         exx = e2 - ecoul
         mf.scf_summary['coul'] = ecoul.real
         mf.scf_summary['exc'] = exx.real
@@ -655,7 +662,10 @@ class KSCF(pbchf.SCF):
             dm_kpts = self.make_rdm1()
         vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
         vhf = vj - vk * .5
-        if dm_kpts.ndim == 3 and kpts_band is None:
+        if getattr(self.with_df, 'jk_route', None) == 'paper' and kpts_band is None:
+            # energy_elec evaluates Eq. (84) of the paper route from J and K
+            vhf = lib.tag_array(vhf, paper_vj=vj, paper_vk=vk)
+        elif dm_kpts.ndim == 3 and kpts_band is None:
             nkpts = len(dm_kpts)
             ecoul = np.einsum('Kij,Kji->', dm_kpts, vj).real * .5/nkpts
             vhf = lib.tag_array(vhf, ecoul=ecoul)

@@ -51,6 +51,7 @@ from pyscf.pbc.df import ft_ao
 from pyscf.pbc.df import aft
 from pyscf.pbc.df import df_jk
 from pyscf.pbc.df import df_ao2mo
+from pyscf.pbc.df import paper_jk
 from pyscf.pbc.df.aft import estimate_eta, _check_kpts
 from pyscf.pbc.df.df_jk import zdotCN
 from pyscf.pbc.lib.kpts import KPoints
@@ -132,10 +133,20 @@ class GDF(lib.StreamObject, aft.AFTDFMixin):
     _prefer_ccdf = False
     # If True, force using density matrix-based K-build
     force_dm_kbuild = False
+    # How J and K are built in get_jk:
+    #   'pyscf'  the blocked implementation of df_jk (default)
+    #   'paper'  the binary contractions of the paper route, on whole tensors
+    #            (Ye and Berkelbach 2026, Eqs. 82, 85a-b, 86a-b; see paper_jk)
+    jk_route = 'pyscf'
+    # Callable (equation, A, B) -> C used by the 'paper' route instead of
+    # numpy.einsum, e.g. another tensor-contraction library
+    binary_backend = None
+    _binary_recorder = None
 
     _keys = {
-        'blockdim', 'force_dm_kbuild', 'cell', 'kpts', 'kpts_band', 'eta',
-        'mesh', 'exp_to_discard', 'exxdiv', 'auxcell', 'linear_dep_threshold',
+        'blockdim', 'force_dm_kbuild', 'jk_route', 'binary_backend', 'cell', 'kpts',
+        'kpts_band', 'eta', 'mesh', 'exp_to_discard', 'exxdiv', 'auxcell',
+        'linear_dep_threshold',
     }
 
     def __init__(self, cell, kpts=None):
@@ -462,6 +473,9 @@ class GDF(lib.StreamObject, aft.AFTDFMixin):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
+        if self.jk_route == 'paper' and omega is not None and omega != 0:
+            raise NotImplementedError("jk_route = 'paper' supports the full-range Coulomb "
+                                      'operator only.')
         if omega is not None and omega != 0:  # J/K for RSH functionals
             cell = self.cell
             # * AFT is computationally more efficient than GDF if the Coulomb
@@ -483,6 +497,10 @@ class GDF(lib.StreamObject, aft.AFTDFMixin):
                                      omega=None, exxdiv=exxdiv)
 
         kpts, is_single_kpt = _check_kpts(self, kpts)
+        if self.jk_route == 'paper':
+            return paper_jk.get_jk(self, dm, hermi, kpts, kpts_band, with_j, with_k,
+                                   exxdiv)
+
         if is_single_kpt:
             return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                 with_k, exxdiv)
@@ -493,6 +511,26 @@ class GDF(lib.StreamObject, aft.AFTDFMixin):
         if with_j:
             vj = df_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
+
+    def record_binary(self, outdir, **kwargs):
+        '''Context manager that prints and saves the operands of every binary
+        contraction of the ``jk_route = 'paper'`` route (see
+        :class:`pyscf.pbc.df.paper_jk.BinaryRecorder`)::
+
+            with mf.with_df.record_binary('tensors', kptij=(0, 1)) as rec:
+                vj, vk = mf.with_df.get_jk(dm, hermi=1)
+            rec.calls
+        '''
+        return paper_jk.BinaryRecorder(self, outdir, **kwargs)
+
+    def energy_elec_paper_route(self, dm_kpts, hcore, vj, vk):
+        '''``E_h``, ``E_J`` and ``E_K`` (Hartree) of Eq. (84) of the paper route,
+        each one binary contraction per k-point; see
+        :func:`pyscf.pbc.df.paper_jk.energy_elec`.  ``vj`` and ``vk`` are the
+        bare Coulomb and exchange matrices, as returned by
+        ``get_jk(..., exxdiv=None)``.
+        '''
+        return paper_jk.energy_elec(self, dm_kpts, hcore, vj, vk)
 
     get_eri = get_ao_eri = df_ao2mo.get_eri
     ao2mo = get_mo_eri = df_ao2mo.general
