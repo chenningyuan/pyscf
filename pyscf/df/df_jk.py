@@ -153,6 +153,10 @@ class _DFHF:
         if dm is None: dm = self.make_rdm1()
         if not self.with_df:
             return super().get_jk(mol, dm, hermi, with_j, with_k, omega)
+        if isinstance(self, scf.ghf.GHF) and getattr(self, 'jk_route', None) == 'paper':
+            raise NotImplementedError('The direct-AO response paper route cannot be '
+                                      'combined with density fitting. Set jk_route on '
+                                      'with_df for a density-fitted paper route.')
         if getattr(self.with_df, 'jk_route', None) == 'paper':
             if not isinstance(self, scf.ghf.GHF):
                 raise NotImplementedError('The two-component paper route requires GHF or GKS.')

@@ -30,6 +30,7 @@ from pyscf.data import nist
 from pyscf.scf import hf
 from pyscf.scf import uhf
 from pyscf.scf import chkfile
+from pyscf.scf import paper_jk_response
 from pyscf import __config__
 
 WITH_META_LOWDIN = getattr(__config__, 'scf_analyze_with_meta_lowdin', True)
@@ -388,8 +389,12 @@ class GHF(hf.SCF):
     '''
 
     with_soc = None
+    jk_route = 'pyscf'
+    binary_backend = None
+    _binary_recorder = None
+    _paper_response_eri = None
 
-    _keys = {'with_soc'}
+    _keys = {'with_soc', 'jk_route', 'binary_backend'}
 
     get_init_guess = hf.RHF.get_init_guess
     get_occ = get_occ
@@ -454,6 +459,14 @@ employing the updated GWH rule from doi:10.1021/ja00480a005.''')
         if chkfile is None: chkfile = self.chkfile
         return init_guess_by_chkfile(self.mol, chkfile, project)
 
+    def reset(self, mol=None):
+        self._paper_response_eri = None
+        return super().reset(mol)
+
+    def record_binary(self, outdir, **kwargs):
+        '''Context manager for operands of the direct-AO J/K response paper route.'''
+        return paper_jk_response.BinaryRecorder(self, outdir, **kwargs)
+
     @lib.with_doc(hf.get_jk.__doc__)
     def get_jk(self, mol=None, dm=None, hermi=0, with_j=True, with_k=True,
                omega=None):
@@ -465,6 +478,8 @@ employing the updated GWH rule from doi:10.1021/ja00480a005.''')
         if dm.shape[-1] != nao * 2 and nao != 0:
             raise ValueError('Dimension inconsistent '
                              f'dm.shape = {dm.shape}, mol.nao = {nao}')
+        if self.jk_route == 'paper':
+            return paper_jk_response.get_jk(self, dm, hermi, with_j, with_k, omega)
 
         def jkbuild(mol, dm, hermi, with_j, with_k, omega=None):
             return hf.RHF.get_jk(self, mol, dm, hermi, with_j, with_k, omega)
