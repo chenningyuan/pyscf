@@ -56,26 +56,21 @@ import numpy
 
 from pyscf import __version__, lib
 from pyscf.lib import logger
+from pyscf.pbc.df import paper_ao2mo
 
 ROUTE = 'Periodic G0W0-AC paper route (Zhu and Chan 2021, Eqs. 22-27)'
 CORPUS = 'pbc_r_ri_gw_corpus'
-AO2MO_CORPUS = 'cd_ri_ao2mo_corpus'
+AO2MO_CORPUS = paper_ao2mo.CORPUS
 
 Case = namedtuple('Case', ['equation', 'a', 'b', 'c', 'coefficient', 'corpus',
                            'case_id', 'corpus_coefficient'], defaults=[None])
 CASES = {
-    'ao2mo.occ_left': Case('Pmn,mi->Pin', 'Pmn', 'mi', 'Pin', '+1',
-                           AO2MO_CORPUS, 'df.mo_occ_left'),
-    'ao2mo.vir_left': Case('Pmn,ma->Pan', 'Pmn', 'ma', 'Pan', '+1',
-                           AO2MO_CORPUS, 'df.mo_vir_left'),
-    'ao2mo.oo_right': Case('Pin,nj->Pij', 'Pin', 'nj', 'Pij', '+1',
-                           AO2MO_CORPUS, 'df.mo_oo_right'),
-    'ao2mo.ov_right': Case('Pin,nb->Pib', 'Pin', 'nb', 'Pib', '+1',
-                           AO2MO_CORPUS, 'df.mo_ov_right'),
-    'ao2mo.vo_right': Case('Pan,ni->Pai', 'Pan', 'ni', 'Pai', '+1',
-                           AO2MO_CORPUS, 'df.mo_vo_right'),
-    'ao2mo.vv_right': Case('Pan,nb->Pab', 'Pan', 'nb', 'Pab', '+1',
-                           AO2MO_CORPUS, 'df.mo_vv_right'),
+    'ao2mo.occ_left': paper_ao2mo.CASES['ao2mo.occ_left'],
+    'ao2mo.vir_left': paper_ao2mo.CASES['ao2mo.vir_left'],
+    'ao2mo.oo_right': paper_ao2mo.CASES['ao2mo.oo_right'],
+    'ao2mo.ov_right': paper_ao2mo.CASES['ao2mo.ov_right'],
+    'ao2mo.vo_right': paper_ao2mo.CASES['ao2mo.vo_right'],
+    'ao2mo.vv_right': paper_ao2mo.CASES['ao2mo.vv_right'],
     'response.polarizability': Case('Pia,Qai->PQ', 'Pia', 'Qai', 'PQ', '+2/Nk',
                                     CORPUS, 'response.polarizability'),
     'screened.left': Case('Pnm,PQ->Qnm', 'Pnm', 'PQ', 'Qnm', '+1',
@@ -147,37 +142,8 @@ def _kpoint_tables(gw, q):
 
 
 def load_q_factors(gw, q, mo_coeff=None):
-    '''Build all Eq. (23) MO factors for one transfer momentum ``q``.'''
-    if mo_coeff is None:
-        mo_coeff = gw.mo_coeff
-    if mo_coeff is None:
-        raise ValueError('MO coefficients are required.')
-    nkpts = gw.nkpts
-    nocc = gw.nocc
-    nmo = gw.nmo
-    _check_memory(gw, nkpts)
-    kidx, kidx_r = _kpoint_tables(gw, q)
-    factors = []
-    for ki in range(nkpts):
-        kj = kidx[ki]
-        kptij = (ki, int(kj))
-        lpq = _load_pair(gw, ki, int(kj))
-        left_o = binary(gw, 'ao2mo.occ_left', lpq,
-                        mo_coeff[ki][:, :nocc].conj(), kptij, q=q)
-        left_v = binary(gw, 'ao2mo.vir_left', lpq,
-                        mo_coeff[ki][:, nocc:].conj(), kptij, q=q)
-        oo = binary(gw, 'ao2mo.oo_right', left_o,
-                    mo_coeff[kj][:, :nocc], kptij, q=q)
-        ov = binary(gw, 'ao2mo.ov_right', left_o,
-                    mo_coeff[kj][:, nocc:], kptij, q=q)
-        vo = binary(gw, 'ao2mo.vo_right', left_v,
-                    mo_coeff[kj][:, :nocc], kptij, q=q)
-        vv = binary(gw, 'ao2mo.vv_right', left_v,
-                    mo_coeff[kj][:, nocc:], kptij, q=q)
-        upper = numpy.concatenate((oo, ov), axis=2)
-        lower = numpy.concatenate((vo, vv), axis=2)
-        factors.append(numpy.concatenate((upper, lower), axis=1))
-    return numpy.ascontiguousarray(factors), kidx, kidx_r
+    '''Build all Eq. (23) MO factors through the canonical shared AO-to-MO route.'''
+    return paper_ao2mo.load_q_factors(gw, q, mo_coeff)
 
 
 def get_rho_response(gw, omega, mo_energy, Lia, kidx, q=None):
