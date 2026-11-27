@@ -53,6 +53,10 @@ def get_normt_diff(cc, t1, t2, t1new, t2new):
 
 
 def update_amps(cc, t1, t2, eris):
+    if getattr(cc, 'ccsd_route', 'pyscf') == 'paper':
+        from pyscf.pbc.cc import paper_kccsd_rhf
+        return paper_kccsd_rhf.update_amps(cc, t1, t2, eris)
+
     time0 = time1 = logger.process_clock(), logger.perf_counter()
     log = logger.Logger(cc.stdout, cc.verbose)
     nkpts, nocc, nvir = t1.shape
@@ -388,6 +392,10 @@ def vector_to_nested(vector, struct, copy=True, ensure_size_matches=True):
 
 
 def energy(cc, t1, t2, eris):
+    if getattr(cc, 'ccsd_route', 'pyscf') == 'paper':
+        from pyscf.pbc.cc import paper_kccsd_rhf
+        return paper_kccsd_rhf.energy(cc, t1, t2, eris)
+
     nkpts, nocc, nvir = t1.shape
     kconserv = cc.khelper.kconserv
     fock = eris.fock
@@ -500,7 +508,7 @@ class RCCSD(pyscf.cc.ccsd.CCSD):
 
     _keys = {
         'kpts', 'khelper', 'ip_partition', 'ea_partition', 'max_space',
-        'direct', 'keep_exxdiv',
+        'direct', 'keep_exxdiv', 'ccsd_route', 'binary_backend',
     }
 
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
@@ -513,6 +521,10 @@ class RCCSD(pyscf.cc.ccsd.CCSD):
         self.ip_partition = None
         self.ea_partition = None
         self.direct = True  # If possible, use GDF to compute Wvvvv on-the-fly
+        self.ccsd_route = 'pyscf'
+        self.binary_backend = None
+        self._binary_recorder = None
+        self._paper_route_info = {}
 
         ##################################################
         # don't modify the following attributes, unless you know what you are doing
@@ -597,6 +609,11 @@ class RCCSD(pyscf.cc.ccsd.CCSD):
 
     energy = energy
     update_amps = update_amps
+
+    def record_binary(self, outdir, **kwargs):
+        '''Context manager that records the opt-in RCCSD paper-route binaries.'''
+        from pyscf.pbc.cc import paper_kccsd_rhf
+        return paper_kccsd_rhf.BinaryRecorder(self, outdir, **kwargs)
 
     def kernel(self, t1=None, t2=None, eris=None, mbpt2=False):
         return self.ccsd(t1, t2, eris, mbpt2=mbpt2)
