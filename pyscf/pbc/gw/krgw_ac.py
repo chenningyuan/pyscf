@@ -429,6 +429,12 @@ def get_sigma(
     omega: complex ndarray
         imaginary frequency grids of self-energy
     """
+    if getattr(gw, 'gw_route', 'pyscf') == 'paper':
+        from pyscf.pbc.gw import paper_krgw_ac
+        return paper_krgw_ac.get_sigma(
+            gw, freqs, wts, ef, mo_energy, orbs, kptlist, mo_coeff, mo_occ,
+            iw_cutoff, fullsigma)
+
     nocc = gw.nocc
     nmo = gw.nmo
     nkpts = gw.nkpts
@@ -680,6 +686,12 @@ def get_sigma_outcore(
     omega: complex ndarray
         imaginary frequency grids of self-energy
     """
+    if getattr(gw, 'gw_route', 'pyscf') == 'paper':
+        from pyscf.pbc.gw import paper_krgw_ac
+        return paper_krgw_ac.get_sigma(
+            gw, freqs, wts, ef, mo_energy, orbs, kptlist, mo_coeff, mo_occ,
+            iw_cutoff, fullsigma)
+
     assert gw.fc is False, "finite-size correction is not implemented in get_sigma_outcore"
     nocc = gw.nocc
     nmo = gw.nmo
@@ -914,6 +926,10 @@ def get_sigma_exchange(gw, mo_coeff_full=None, mo_occ_full=None):
     vk : complex ndarray
         exchange self-energy
     """
+    if getattr(gw, 'gw_route', 'pyscf') == 'paper':
+        from pyscf.pbc.gw import paper_krgw_ac
+        return paper_krgw_ac.get_sigma_exchange(gw, mo_coeff_full, mo_occ_full)
+
     nmo = gw.nmo
     nkpts = gw.nkpts
     kpts = gw.kpts
@@ -1325,13 +1341,17 @@ class KRGWAC(lib.StreamObject):
         self.qpe_linearized = False  # use linearized quasiparticle equation
         self.qpe_linearized_range = [0.5, 1.5]  # Z-shot factor range, if not in this range, z=1
         self.writefile = 0  # write file level
+        self.gw_route = 'pyscf'
+        self.binary_backend = None
+        self._binary_recorder = None
+        self._paper_route_info = {}
 
         # DF-KGW must use GDF integrals
         if getattr(mf, 'with_df', None):
             self.with_df = mf.with_df
         else:
             raise NotImplementedError
-        self._keys.update(['with_df'])
+        self._keys.update(['with_df', 'gw_route', 'binary_backend'])
 
         ##################################################
         # don't modify the following attributes, they are not input options
@@ -1456,6 +1476,11 @@ class KRGWAC(lib.StreamObject):
         kernel(self)
         logger.timer(self, 'KRGWAC', *cput0)
         return
+
+    def record_binary(self, outdir, **kwargs):
+        '''Context manager that records the opt-in GW paper-route binaries.'''
+        from pyscf.pbc.gw import paper_krgw_ac
+        return paper_krgw_ac.BinaryRecorder(self, outdir, **kwargs)
 
     set_frozen_orbs = set_frozen_orbs
     make_rdm1 = make_rdm1_linear
