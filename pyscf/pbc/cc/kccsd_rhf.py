@@ -508,7 +508,7 @@ class RCCSD(pyscf.cc.ccsd.CCSD):
 
     _keys = {
         'kpts', 'khelper', 'ip_partition', 'ea_partition', 'max_space',
-        'direct', 'keep_exxdiv', 'ccsd_route', 'binary_backend',
+        'direct', 'keep_exxdiv', 'ccsd_route', 'ccsd_t_route', 'binary_backend',
     }
 
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
@@ -522,6 +522,7 @@ class RCCSD(pyscf.cc.ccsd.CCSD):
         self.ea_partition = None
         self.direct = True  # If possible, use GDF to compute Wvvvv on-the-fly
         self.ccsd_route = 'pyscf'
+        self.ccsd_t_route = 'pyscf'
         self.binary_backend = None
         self._binary_recorder = None
         self._paper_route_info = {}
@@ -610,8 +611,13 @@ class RCCSD(pyscf.cc.ccsd.CCSD):
     energy = energy
     update_amps = update_amps
 
-    def record_binary(self, outdir, **kwargs):
-        '''Context manager that records the opt-in RCCSD paper-route binaries.'''
+    def record_binary(self, outdir, route='ccsd', **kwargs):
+        '''Context manager that records an opt-in CCSD or CCSD(T) paper route.'''
+        if route in ('ccsd_t', 't'):
+            from pyscf.pbc.cc import paper_kccsd_t_rhf
+            return paper_kccsd_t_rhf.BinaryRecorder(self, outdir, **kwargs)
+        if route != 'ccsd':
+            raise ValueError("route must be 'ccsd' or 'ccsd_t'.")
         from pyscf.pbc.cc import paper_kccsd_rhf
         return paper_kccsd_rhf.BinaryRecorder(self, outdir, **kwargs)
 

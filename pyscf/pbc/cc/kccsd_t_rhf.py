@@ -61,6 +61,10 @@ def kernel(mycc, eris, t1=None, t2=None, max_memory=2000, verbose=logger.INFO):
     Returns:
         energy_t (float): The real-part of the k-point CCSD(T) energy.
     '''
+    if getattr(mycc, 'ccsd_t_route', 'pyscf') == 'paper':
+        from pyscf.pbc.cc import paper_kccsd_t_rhf
+        return paper_kccsd_t_rhf.kernel(mycc, eris, t1, t2, max_memory, verbose)
+
     assert isinstance(mycc, pyscf.pbc.cc.kccsd_rhf.RCCSD)
     cpu1 = cpu0 = (logger.process_clock(), logger.perf_counter())
     if isinstance(verbose, logger.Logger):
