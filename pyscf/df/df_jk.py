@@ -153,6 +153,14 @@ class _DFHF:
         if dm is None: dm = self.make_rdm1()
         if not self.with_df:
             return super().get_jk(mol, dm, hermi, with_j, with_k, omega)
+        if getattr(self.with_df, 'jk_route', None) == 'paper':
+            if not isinstance(self, scf.ghf.GHF):
+                raise NotImplementedError('The two-component paper route requires GHF or GKS.')
+            if self.only_dfj and with_k:
+                raise NotImplementedError('The RI-K paper route cannot be used with only_dfj=True.')
+            from pyscf.df import paper_jk
+            return paper_jk.get_jk(self.with_df, dm, hermi, with_j, with_k,
+                                   self.direct_scf_tol, omega)
 
         vj = vk = None
         with_dfk = with_k and not self.only_dfj
@@ -177,6 +185,30 @@ class _DFHF:
         if with_k and not with_dfk:
             vk = super().get_jk(mol, dm, hermi, False, True, omega)[1]
         return vj, vk
+
+    def energy_elec(self, dm=None, h1e=None, vhf=None):
+        if (getattr(self.with_df, 'jk_route', None) == 'paper' and
+                isinstance(self, scf.ghf.GHF) and
+                not isinstance(self, scf.hf.KohnShamDFT)):
+            if dm is None: dm = self.make_rdm1()
+            if h1e is None: h1e = self.get_hcore()
+            if vhf is None: vhf = self.get_veff(self.mol, dm)
+            e1 = numpy.einsum('ij,ji->', h1e, dm).real
+            e_tot = self.with_df.energy_elec_paper_route(dm, h1e, vhf).real
+            e2 = e_tot - e1
+            self.scf_summary['e1'] = e1
+            self.scf_summary['e2'] = e2
+            if hasattr(vhf, 'ecoul'):
+                ecoul = vhf.ecoul.real
+                exx = e2 - ecoul
+                self.scf_summary['coul'] = ecoul
+                self.scf_summary['exc'] = exx
+                logger.debug(self, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s',
+                             e1, e2, ecoul, exx)
+            else:
+                logger.debug(self, 'E1 = %s  E2 = %s', e1, e2)
+            return e_tot, e2
+        return super().energy_elec(dm, h1e, vhf)
 
     # for pyscf 1.0, 1.1 compatibility
     @property

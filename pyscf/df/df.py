@@ -32,6 +32,7 @@ from pyscf.df import outcore
 from pyscf.df import r_incore
 from pyscf.df import addons
 from pyscf.df import df_jk
+from pyscf.df import paper_jk
 from pyscf.ao2mo import _ao2mo
 from pyscf.ao2mo.incore import _conc_mos, iden_coeffs
 from pyscf.ao2mo.outcore import _load_from_h5g
@@ -94,11 +95,17 @@ class DF(lib.StreamObject):
 
     blockdim = getattr(__config__, 'df_df_DF_blockdim', 240)
 
+    # 'pyscf' uses the blocked DF implementation; 'paper' uses whole spinor tensors
+    jk_route = 'pyscf'
+    binary_backend = None
+    _binary_recorder = None
+    _paper_route_integrals = None
+
     # Store DF tensor in a format compatible to pyscf-1.1 - pyscf-1.6
     _compatible_format = getattr(__config__, 'df_df_DF_compatible_format', False)
     _dataname = 'j3c'
 
-    _keys = {'mol', 'auxmol'}
+    _keys = {'mol', 'auxmol', 'jk_route', 'binary_backend'}
 
     def __init__(self, mol, auxbasis=None):
         self.mol = mol
@@ -116,9 +123,11 @@ class DF(lib.StreamObject):
         self._cderi = None
         self._vjopt = None
         self._rsh_df = {}  # Range separated Coulomb DF objects
+        self._paper_route_integrals = None
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
-            excludes=('_cderi_to_save', '_cderi', '_vjopt', '_rsh_df'),
+            excludes=('_cderi_to_save', '_cderi', '_vjopt', '_rsh_df',
+                      '_paper_route_integrals'),
             reset_state=True)
 
     @property
@@ -209,6 +218,7 @@ class DF(lib.StreamObject):
         self._cderi = None
         self._vjopt = None
         self._rsh_df = {}
+        self._paper_route_integrals = None
         return self
 
     def loop(self, blksize=None):
@@ -259,12 +269,23 @@ class DF(lib.StreamObject):
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
                direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),
                omega=None):
+        if self.jk_route == 'paper':
+            return paper_jk.get_jk(self, dm, hermi, with_j, with_k,
+                                   direct_scf_tol, omega)
         if omega is None:
             return df_jk.get_jk(self, dm, hermi, with_j, with_k, direct_scf_tol)
 
         # A temporary treatment for RSH-DF integrals
         with self.range_coulomb(omega) as rsh_df:
             return df_jk.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol)
+
+    def record_binary(self, outdir, **kwargs):
+        '''Context manager for the operands of the two-component RI-JK paper route.'''
+        return paper_jk.BinaryRecorder(self, outdir, **kwargs)
+
+    def energy_elec_paper_route(self, dm, hcore, vhf):
+        '''Pure-HF electronic energy through the paper route's energy.trace binary.'''
+        return paper_jk.energy_elec(self, dm, hcore, vhf)
 
     def get_eri(self):
         nao = self.mol.nao_nr()
@@ -373,6 +394,8 @@ class DF4C(DF):
     def get_jk(self, dm, hermi=1, with_j=True, with_k=True,
                direct_scf_tol=getattr(__config__, 'scf_hf_SCF_direct_scf_tol', 1e-13),
                omega=None):
+        if self.jk_route == 'paper':
+            raise NotImplementedError('The two-component paper route does not support DHF.')
         if omega is None:
             return df_jk.r_get_jk(self, dm, hermi, with_j, with_k)
 
